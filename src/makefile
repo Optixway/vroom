@@ -7,7 +7,7 @@
 CXX ?= g++
 USE_ROUTING ?= true
 CXXFLAGS = -MMD -MP -I. -std=c++20 -Wextra -Wpedantic -Wall -O3 -DASIO_STANDALONE -DUSE_ROUTING=$(USE_ROUTING)
-LDLIBS = -lpthread
+LDLIBS = -lws2_32 -lwsock32 -lcrypt32 -lssl -lcrypto
 
 # Using all cpp files in current directory.
 MAIN = ../bin/vroom

@@ -8,7 +8,6 @@ All rights reserved (see LICENSE).
 */
 
 #include <utility>
-
 #include <asio.hpp>
 #include <asio/ssl.hpp>
 
@@ -70,14 +69,13 @@ std::string HttpWrapper::send_then_receive(const std::string& query) const {
   std::string response;
 
   try {
-    asio::io_service io_service;
+    asio::io_context io_ctx;
 
-    tcp::resolver r(io_service);
+    tcp::resolver r(io_ctx);
+    auto results = r.resolve(_server.host, _server.port);
 
-    const tcp::resolver::query q(_server.host, _server.port);
-
-    tcp::socket s(io_service);
-    asio::connect(s, r.resolve(q));
+    tcp::socket s(io_ctx);
+    asio::connect(s, results);
 
     asio::write(s, asio::buffer(query));
 
@@ -94,17 +92,20 @@ std::string HttpWrapper::ssl_send_then_receive(const std::string& query) const {
   std::string response;
 
   try {
-    asio::io_service io_service;
+    asio::io_context io_ctx;
 
-    asio::ssl::context ctx(asio::ssl::context::method::sslv23_client);
-    asio::ssl::stream<asio::ip::tcp::socket> ssock(io_service, ctx);
+    asio::ssl::context ctx(asio::ssl::context::tls_client);
+    asio::ssl::stream<tcp::socket> ssock(io_ctx, ctx);
 
-    tcp::resolver r(io_service);
+    tcp::resolver r(io_ctx);
+    auto results = r.resolve(_server.host, _server.port);
 
-    const tcp::resolver::query q(_server.host, _server.port);
+    asio::connect(ssock.lowest_layer(), results);
 
-    asio::connect(ssock.lowest_layer(), r.resolve(q));
-    ssock.handshake(asio::ssl::stream_base::handshake_type::client);
+    // Optional: set SNI for servers that require it
+    SSL_set_tlsext_host_name(ssock.native_handle(), _server.host.c_str());
+
+    ssock.handshake(asio::ssl::stream_base::client);
 
     asio::write(ssock, asio::buffer(query));
 
@@ -166,9 +167,6 @@ Matrices HttpWrapper::get_matrices(const std::vector<Location>& locs) const {
     for (rapidjson::SizeType j = 0; j < m_size; ++j) {
       if (duration_value_is_null(duration_line[j]) ||
           distance_value_is_null(distance_line[j])) {
-        // No route found between i and j. Just storing info as we
-        // don't know yet which location is responsible between i
-        // and j.
         ++nb_unfound_from_loc[i];
         ++nb_unfound_to_loc[j];
       } else {
@@ -210,8 +208,6 @@ void HttpWrapper::update_sparse_matrix(const std::vector<Location>& route_locs,
 };
 
 void HttpWrapper::add_geometry(Route& route) const {
-  // Ordering locations for the given steps, excluding
-  // breaks.
   std::vector<Location> non_break_locations;
   non_break_locations.reserve(route.steps.size());
 
@@ -230,7 +226,7 @@ void HttpWrapper::add_geometry(Route& route) const {
   rapidjson::Document json_result;
   parse_response(json_result, json_string);
   this->check_response(json_result,
-                       non_break_locations, // not supposed to be used
+                       non_break_locations,
                        _route_service);
 
   assert(get_legs(json_result).Size() == non_break_locations.size() - 1);
